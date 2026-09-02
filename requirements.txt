@@ -1,0 +1,6 @@
+requests
+pyyaml
+psutil
+cryptography
+pypdf
+argostranslate

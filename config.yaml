@@ -1,0 +1,40 @@
+# miAi - configurazione. Personalizza qui, niente codice da toccare.
+
+# I tuoi interessi: l'AI li usa per dare un punteggio di rilevanza alle repo.
+interessi:
+  - AI / machine learning
+  - sviluppo web
+  - dati e analytics
+  - sicurezza informatica
+  - mobile / app
+
+# Linguaggi prioritari (filtrano le query GitHub)
+linguaggi:
+  - Python
+  - TypeScript
+  - JavaScript
+
+# Soglie
+stelle_min_nuove: 20
+stelle_min_trend: 200
+giorni_nuove: 7
+giorni_trend: 14
+max_shortlist: 30
+max_report: 20
+idee_per_angolo: 5
+verdict_min_score: 5
+
+# Sezione Disco
+disco_roots:
+  - "%USERPROFILE%"
+disco_big_mb: 200
+disco_cold_days: 180
+disco_dup_min_mb: 50
+disco_alert_pct: 12
+
+# Modello (Ollama locale di default; configurabile dall'app)
+modello: qwen2.5:3b-instruct
+modello_forte: qwen2.5:7b-instruct
+ollama_url: http://127.0.0.1:11434
+
+# GitHub token opzionale (env var GITHUB_TOKEN): alza il rate limit. Lascia vuoto.

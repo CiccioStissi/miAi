@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.json
+!package.json
+app.html
+*.db
+*.sqlite*
+*.log
+pin.json
+store.json
+llm.json
+i18n/
+.claude/
+memory/
+*.lnk
