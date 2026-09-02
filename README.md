@@ -1,5 +1,7 @@
 # miAi
 
+*Leggi in: **Italiano** · [English](README.en.md)*
+
 **Centro di comando personale — locale, offline e privacy-first.**
 Un'unica dashboard che raccoglie notizie, trend GitHub, idee di business, progetti, task,
 analisi del CV, un gioco per imparare la cybersecurity e molto altro. Gira interamente sul
@@ -32,7 +34,9 @@ tuo PC: **nessun dato personale esce dal computer e finisce in rete.**
 | **GitHub** | Repository nuove e di tendenza filtrate per i tuoi interessi, con punteggio di rilevanza. |
 | **Idee** | Idee di business generate incrociando trend reali e i tuoi interessi. |
 | **Progetti / Task** | I tuoi progetti attivi con avanzamento e task collegati, con priorità. |
-| **Analisi CV** | Carichi il CV in PDF: estrazione dati, suggerimenti e punteggio 0–100. |
+| **Analisi CV** | Carichi il CV in PDF: estrazione dati, valutazione ATS (parole chiave, verbi d'azione, risultati quantificati), suggerimenti e punteggio 0–100. |
+| **CV Builder LaTeX** | Da un testo o un vecchio CV genera un CV professionale in **LaTeX**, migliorato applicando i consigli dell'analisi; scarichi `.tex` e **PDF**. |
+| **Editor CV (mantieni struttura)** | Carichi un CV esistente (PDF): estraggo sezioni e contenuti nell'ordine originale, modifichi **solo i testi** (con "migliora con AI" per sezione, senza inventare) e rigenero mantenendo la **stessa struttura**. |
 | **CyberQuest** | Percorso a livelli per imparare la cybersecurity difensiva giocando (quiz + mini-giochi interattivi). |
 | **Riassunto PDF** | Sintesi, punti chiave e domande da un PDF (paper, dispensa, contratto). |
 | **Palestra colloquio** | Domande di colloquio realistiche dal tuo CV e dal ruolo target. |
@@ -93,6 +97,10 @@ Apri **http://127.0.0.1:8770/app**.
 > dalla sezione **Modello AI**.
 
 Su Windows puoi attivare l'**avvio automatico** al login dalle Impostazioni dell'app.
+
+> Per esportare il **CV in PDF** dal CV Builder serve una distribuzione LaTeX installata
+> (MiKTeX o TeX Live). Senza, resta comunque il download del sorgente `.tex` (compilabile
+> anche su Overleaf).
 
 ---
 

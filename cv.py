@@ -29,7 +29,10 @@ def extract_text(pdf_bytes):
     except Exception as e:
         raise ValueError(f"PDF non leggibile: {e}")
     parts = [(p.extract_text() or "") for p in reader.pages]
-    text = re.sub(r"\n{3,}", "\n\n", "\n".join(parts)).strip()
+    # NFKC: normalizza le legature dei PDF (ﬃ -> ffi, ﬁ -> fi...) e altri caratteri compat
+    import unicodedata
+    text = unicodedata.normalize("NFKC", "\n".join(parts))
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
     if len(text) < 30:
         raise ValueError("PDF senza testo estraibile (forse e' una scansione/immagine).")
     return text[:MAX_CHARS]
@@ -51,8 +54,13 @@ _PROMPT = (
     '"punti_forti":["cosa gia funziona, max 5"],'
     '"problemi":[{{"cosa":"il problema","come":"azione concreta per risolverlo","gravita":"alta|media|bassa"}}],'
     '"riscritture":[{{"prima":"frase debole presa dal CV","dopo":"versione piu forte e misurabile"}}]}}\n'
-    "Regole: punteggio e dettaglio sono interi 0-100. Dai 3-6 problemi ordinati per gravita', "
-    "2-4 riscritture concrete. Scrivi in italiano. Niente testo fuori dal JSON."
+    "Regole: punteggio e dettaglio sono interi 0-100 e devono essere COERENTI col giudizio. "
+    "Valuta con criteri concreti: verbi d'azione, risultati QUANTIFICATI (numeri/%/impatto), "
+    "compatibilita' con i filtri ATS (parole chiave del ruolo, formato pulito), assenza di frasi "
+    "generiche o riempitive, coerenza cronologica. Dai 3-6 problemi ordinati per gravita', ognuno "
+    "con un'azione concreta e specifica (non consigli vaghi). Dai 2-4 riscritture: 'prima' e' una "
+    "frase debole PRESA dal CV, 'dopo' e' piu' forte, specifica e misurabile. Scrivi nella stessa "
+    "lingua del CV. Niente testo fuori dal JSON."
 )
 
 
@@ -217,6 +225,272 @@ def jobmatch_url(cv, url, ollama_url="http://localhost:11434", model="llama3.2:3
     return d
 
 
+# ================= CV Builder in LaTeX =================
+# Il modello produce SOLO il CONTENUTO migliorato in JSON; il LaTeX lo genera Python
+# (template fisso, escaping corretto): cosi il .tex compila sempre, niente LaTeX rotto
+# inventato da un modello piccolo. Poi MiKTeX/pdflatex compila in PDF (se presente).
+
+_TEX_MAP = {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#",
+            "_": r"\_", "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}"}
+
+
+def _tex(s):
+    return "".join(_TEX_MAP.get(c, c) for c in str(s or ""))
+
+
+_CV_BUILD_PROMPT = (
+    "Sei un career coach esperto. Dato il CV grezzo qui sotto, RISCRIVILO in meglio: bullet piu' "
+    "forti, concreti e possibilmente misurabili, sintesi efficace, ordine sensato. NON inventare "
+    "esperienze, titoli, date o competenze non presenti nel testo. Mantieni la STESSA lingua del CV.\n\n"
+    "CV:\n{cv}\n\n{sugg}"
+    "Rispondi SOLO in JSON con questa struttura:\n"
+    '{{"nome":"","ruolo":"","contatti":{{"email":"","telefono":"","luogo":"","link":["url o handle"]}},'
+    '"sintesi":"2-3 righe","competenze":["skill"],'
+    '"esperienze":[{{"ruolo":"","dove":"","periodo":"","punti":["bullet migliorati"]}}],'
+    '"istruzione":[{{"titolo":"","dove":"","anno":""}}],'
+    '"lingue":["es. Italiano (madrelingua)"],'
+    '"extra":[{{"titolo":"nome sezione (es. Progetti, Certificazioni)","voci":["voce"]}}]}}'
+)
+
+
+def analysis_to_text(a):
+    """Serializza l'analisi CV (dati strutturati) in testo, per ricostruire il CV."""
+    L = []
+    for k in ("nome", "ruolo", "sintesi"):
+        if a.get(k):
+            L.append(f"{k.capitalize()}: {a[k]}")
+    c = a.get("contatti") or {}
+    ct = [x for x in (c.get("email"), c.get("telefono"), c.get("link")) if x]
+    if ct:
+        L.append("Contatti: " + ", ".join(map(str, ct)))
+    if a.get("competenze"):
+        L.append("Competenze: " + ", ".join(map(str, a["competenze"])))
+    for e in a.get("esperienze") or []:
+        L.append(f"Esperienza: {e.get('ruolo','')} - {e.get('dove','')} ({e.get('periodo','')})")
+        L += ["  - " + str(p) for p in (e.get("punti") or [])]
+    for i in a.get("istruzione") or []:
+        L.append(f"Istruzione: {i.get('titolo','')} - {i.get('dove','')} ({i.get('anno','')})")
+    return "\n".join(L)
+
+
+def suggestions_from(a):
+    """Consigli dall'analisi (problemi + riscritture) da applicare nel nuovo CV."""
+    out = []
+    for pb in a.get("problemi") or []:
+        if pb.get("cosa"):
+            out.append(f"- {pb.get('cosa','')}: {pb.get('come','')}")
+    for rw in a.get("riscritture") or []:
+        if rw.get("prima"):
+            out.append(f"- Riscrivi \"{rw.get('prima','')}\" in modo piu' forte come \"{rw.get('dopo','')}\"")
+    return "\n".join(out)
+
+
+def cv_build_json(text, suggestions=""):
+    sugg = ("Applica questi consigli dell'analisi al nuovo CV:\n" + suggestions + "\n\n") if suggestions else ""
+    prompt = _CV_BUILD_PROMPT.format(cv=text[:MAX_CHARS], sugg=sugg)
+    return json.loads(llm.generate(prompt, fmt="json", timeout=300))
+
+
+_TEX_PREAMBLE = r"""\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1.7cm]{geometry}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage[dvipsnames]{xcolor}
+\usepackage[hidelinks]{hyperref}
+\definecolor{accent}{HTML}{2B5CE0}
+\setlist[itemize]{leftmargin=1.2em,itemsep=1pt,topsep=2pt}
+\titleformat{\section}{\large\bfseries\color{accent}}{}{0em}{}[\vspace{-0.6em}\color{accent}\rule{\linewidth}{0.8pt}]
+\titlespacing{\section}{0pt}{10pt}{5pt}
+\setlength{\parindent}{0pt}
+\pagestyle{empty}
+"""
+
+
+def _tex_section(title, body):
+    return "\\section{" + _tex(title) + "}\n" + body + "\n" if body.strip() else ""
+
+
+def render_latex(cv):
+    """Genera un documento LaTeX completo (pdflatex) dal CV strutturato."""
+    name = _tex(cv.get("nome") or "Nome Cognome")
+    role = _tex(cv.get("ruolo") or "")
+    c = cv.get("contatti") or {}
+    links = c.get("link") or []
+    if isinstance(links, str):
+        links = [links]
+    bits = [x for x in (c.get("email"), c.get("telefono"), c.get("luogo"), *links) if x]
+    contact = r" \ \textbullet\ ".join(_tex(b) for b in bits)
+
+    parts = [_TEX_PREAMBLE, r"\begin{document}",
+             r"\begin{center}{\Huge\bfseries " + name + r"}\\[2pt]"]
+    if role:
+        parts.append(r"{\large\color{accent}" + role + r"}\\[3pt]")
+    if contact:
+        parts.append(r"{\small " + contact + r"}")
+    parts.append(r"\end{center}\vspace{4pt}")
+
+    if cv.get("sintesi"):
+        parts.append(_tex_section("Profilo", _tex(cv["sintesi"])))
+    if cv.get("competenze"):
+        skills = ", ".join(_tex(s) for s in cv["competenze"])
+        parts.append(_tex_section("Competenze", skills))
+
+    exp = ""
+    for e in cv.get("esperienze") or []:
+        head = r"\textbf{" + _tex(e.get("ruolo", "")) + "}"
+        if e.get("dove"):
+            head += r" \textit{" + _tex(e["dove"]) + "}"
+        if e.get("periodo"):
+            head += r"\hfill {\small " + _tex(e["periodo"]) + "}"
+        exp += head + r"\\" + "\n"
+        pts = [p for p in (e.get("punti") or []) if str(p).strip()]
+        if pts:
+            exp += r"\begin{itemize}" + "\n" + "\n".join(r"\item " + _tex(p) for p in pts) + "\n" + r"\end{itemize}" + "\n"
+        exp += r"\vspace{3pt}" + "\n"
+    parts.append(_tex_section("Esperienza", exp))
+
+    edu = ""
+    for i in cv.get("istruzione") or []:
+        edu += r"\textbf{" + _tex(i.get("titolo", "")) + "}"
+        if i.get("dove"):
+            edu += " -- " + _tex(i["dove"])
+        if i.get("anno"):
+            edu += r"\hfill {\small " + _tex(i["anno"]) + "}"
+        edu += r"\\" + "\n"
+    parts.append(_tex_section("Istruzione", edu))
+
+    if cv.get("lingue"):
+        parts.append(_tex_section("Lingue", ", ".join(_tex(x) for x in cv["lingue"])))
+    for sec in cv.get("extra") or []:
+        voci = [v for v in (sec.get("voci") or []) if str(v).strip()]
+        if voci:
+            body = r"\begin{itemize}" + "\n" + "\n".join(r"\item " + _tex(v) for v in voci) + "\n" + r"\end{itemize}"
+            parts.append(_tex_section(sec.get("titolo", "Altro"), body))
+
+    parts.append(r"\end{document}")
+    return "\n".join(p for p in parts if p)
+
+
+def build_latex(text, suggestions=""):
+    cv = cv_build_json(text, suggestions)
+    return render_latex(cv), cv
+
+
+# ---- Editor contenuti: estrai fedelmente struttura+contenuti, modifica SOLO il testo ----
+_CV_EXTRACT_PROMPT = (
+    "Estrai questo CV MANTENENDO le sue sezioni e il loro ORDINE originale. NON migliorare, "
+    "NON inventare, NON riordinare, NON riassumere: riporta i contenuti in modo FEDELE, parola per "
+    "parola dove puoi. Mantieni la lingua.\n"
+    "REGOLE IMPORTANTI:\n"
+    "- Ogni contenuto va in UNA SOLA sezione: NON duplicare righe o voci tra sezioni diverse.\n"
+    "- La sezione Profilo/Sommario contiene SOLO il paragrafo introduttivo, NON esperienze/studi/skill.\n"
+    "- Metti ogni riga sotto la sezione a cui appartiene nell'originale.\n"
+    "- Se una voce ha ruolo/azienda/periodo o titolo di studio, mettili nei campi 'titolo'/'periodo'.\n\n"
+    "CV:\n{cv}\n\n"
+    "Rispondi SOLO in JSON:\n"
+    '{{"nome":"","ruolo":"","contatti":{{"email":"","telefono":"","luogo":"","link":["url/handle"]}},'
+    '"sezioni":[{{"titolo":"nome sezione come nell\'originale",'
+    '"blocchi":[{{"titolo":"(es. Ruolo - Azienda, o Titolo di studio; vuoto se non serve)",'
+    '"periodo":"(vuoto se assente)","righe":["riga o bullet, testo fedele"]}}]}}]}}'
+)
+
+
+def cv_extract_structured(text):
+    """Estrae il CV in un modello generico a sezioni/blocchi, fedele all'originale."""
+    return json.loads(llm.generate(_CV_EXTRACT_PROMPT.format(cv=text[:MAX_CHARS]), fmt="json", timeout=300))
+
+
+def improve_text(text, ruolo=""):
+    """Migliora un pezzo di testo del CV senza inventare fatti (per il tasto 'Migliora')."""
+    if not (text or "").strip():
+        return text
+    prompt = ("Migliora questo testo di un CV: piu' incisivo, verbi d'azione, concreto e quando "
+              "possibile quantificato. NON inventare fatti, numeri o esperienze non presenti. "
+              "Mantieni la STESSA lingua e lo stesso significato. "
+              + (f"Ruolo target: {ruolo}. " if ruolo else "")
+              + "Rispondi SOLO con il testo migliorato, senza virgolette ne' spiegazioni.\n\nTESTO:\n" + text)
+    return llm.generate(prompt).strip()
+
+
+def _tex_header(cv):
+    name = _tex(cv.get("nome") or "Nome Cognome")
+    role = _tex(cv.get("ruolo") or "")
+    c = cv.get("contatti") or {}
+    links = c.get("link") or []
+    if isinstance(links, str):
+        links = [links]
+    bits = [x for x in (c.get("email"), c.get("telefono"), c.get("luogo"), *links) if x]
+    contact = r" \ \textbullet\ ".join(_tex(b) for b in bits)
+    out = [r"\begin{center}{\Huge\bfseries " + name + r"}\\[2pt]"]
+    if role:
+        out.append(r"{\large\color{accent}" + role + r"}\\[3pt]")
+    if contact:
+        out.append(r"{\small " + contact + r"}")
+    out.append(r"\end{center}\vspace{4pt}")
+    return "\n".join(out)
+
+
+def render_latex_generic(m):
+    """Rende in LaTeX il modello generico a sezioni/blocchi (struttura preservata)."""
+    parts = [_TEX_PREAMBLE, r"\begin{document}", _tex_header(m)]
+    for sez in m.get("sezioni") or []:
+        body = ""
+        for b in sez.get("blocchi") or []:
+            righe = [r for r in (b.get("righe") or []) if str(r).strip()]
+            head = ""
+            if b.get("titolo"):
+                head = r"\textbf{" + _tex(b["titolo"]) + "}"
+            if b.get("periodo"):
+                head += r"\hfill {\small " + _tex(b["periodo"]) + "}"
+            if head:
+                body += head + r"\\" + "\n"
+            if len(righe) > 1:
+                body += (r"\begin{itemize}" + "\n"
+                         + "\n".join(r"\item " + _tex(r) for r in righe)
+                         + "\n" + r"\end{itemize}" + "\n")
+            elif righe:
+                body += _tex(righe[0]) + r"\\" + "\n"
+            body += r"\vspace{2pt}" + "\n"
+        parts.append(_tex_section(sez.get("titolo", ""), body))
+    parts.append(r"\end{document}")
+    return "\n".join(p for p in parts if p)
+
+
+def latex_available():
+    import shutil
+    return bool(shutil.which("pdflatex"))
+
+
+def compile_pdf(tex):
+    """Compila il .tex in PDF con pdflatex (MiKTeX). Ritorna (pdf_bytes, None) o (None, log)."""
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+    if not latex_available():
+        return None, "pdflatex non trovato (installa MiKTeX o TeX Live)"
+    d = tempfile.mkdtemp(prefix="cvtex_")
+    try:
+        with open(os.path.join(d, "cv.tex"), "w", encoding="utf-8") as f:
+            f.write(tex)
+        r = None
+        for _ in range(2):   # due passate: layout stabile
+            r = subprocess.run(["pdflatex", "-interaction=nonstopmode", "-halt-on-error", "cv.tex"],
+                               cwd=d, capture_output=True, text=True, timeout=120)
+        pdf = os.path.join(d, "cv.pdf")
+        if os.path.exists(pdf):
+            with open(pdf, "rb") as f:
+                return f.read(), None
+        log = (r.stdout if r else "")[-1500:]
+        return None, "compilazione fallita:\n" + log
+    except subprocess.TimeoutExpired:
+        return None, "compilazione troppo lenta (timeout)"
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def _demo():
     # firma minima PDF: verifica che extract_text rifiuti input non-PDF
     try:
@@ -239,7 +513,13 @@ def _demo():
     p.feed("<html><head><style>x{}</style></head><body>Ciao<script>evil()</script> Mondo</body></html>")
     txt = " ".join(p.out)
     assert "Ciao" in txt and "Mondo" in txt and "evil" not in txt, txt
-    print("ok: cv guardie coerenti (SSRF + HTML strip)")
+    # LaTeX builder: escaping dei caratteri speciali + documento ben formato
+    assert _tex("R&D 100% #1 a_b") == r"R\&D 100\% \#1 a\_b"
+    tex = render_latex({"nome": "Mario R&D", "ruolo": "Dev",
+                        "esperienze": [{"ruolo": "Eng", "dove": "ACME", "punti": ["x_1 & y"]}]})
+    assert tex.startswith(r"\documentclass") and r"\end{document}" in tex
+    assert r"Mario R\&D" in tex and r"x\_1 \& y" in tex
+    print("ok: cv guardie coerenti (SSRF + HTML strip + LaTeX escape)")
 
 
 if __name__ == "__main__":

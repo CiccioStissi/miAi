@@ -8,7 +8,7 @@ Avvio:  python server.py         -> http://localhost:8770
         python server.py --open  -> apre anche il browser
 """
 import json, os, sqlite3, subprocess, shutil, sys, threading, time, webbrowser
-import hashlib, hmac, secrets
+import base64, hashlib, hmac, secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import psutil
@@ -961,6 +961,65 @@ class H(BaseHTTPRequestHandler):
                                     avoid=data.get("avoid") or [], ollama_url=CFG["ollama_url"], model=CFG["modello"])
             except Exception as e:
                 out = {"error": f"Generazione fallita: {e}"[:160]}
+            self._send(json.dumps(out, ensure_ascii=False).encode(), "application/json")
+        elif self.path.startswith("/cv-latex"):
+            import cv
+            try:
+                text = str(data.get("text", "") or "")
+                sugg = str(data.get("suggestions", "") or "")
+                if data.get("pdf"):
+                    text = cv.extract_text(base64.b64decode(str(data["pdf"])))
+                elif data.get("analysis"):
+                    a = data["analysis"]
+                    text = cv.analysis_to_text(a)
+                    if not sugg:
+                        sugg = cv.suggestions_from(a)
+                if not text.strip():
+                    out = {"error": "Nessun testo di partenza: incolla un CV o analizzane uno."}
+                else:
+                    tex, cvj = cv.build_latex(text, sugg)
+                    out = {"ok": True, "tex": tex, "cv": cvj, "latex": cv.latex_available()}
+            except ValueError as e:
+                out = {"error": str(e)}
+            except Exception as e:
+                out = {"error": f"Generazione LaTeX fallita: {e}"[:160]}
+            self._send(json.dumps(out, ensure_ascii=False).encode(), "application/json")
+        elif self.path.startswith("/cv-extract"):
+            import cv
+            try:
+                text = str(data.get("text", "") or "")
+                if data.get("pdf"):
+                    text = cv.extract_text(base64.b64decode(str(data["pdf"])))
+                if not text.strip():
+                    out = {"error": "Nessun testo: carica un PDF con testo o incolla il CV."}
+                else:
+                    out = {"ok": True, "model": cv.cv_extract_structured(text), "latex": cv.latex_available()}
+            except ValueError as e:
+                out = {"error": str(e)}
+            except Exception as e:
+                out = {"error": f"Estrazione fallita: {e}"[:160]}
+            self._send(json.dumps(out, ensure_ascii=False).encode(), "application/json")
+        elif self.path.startswith("/cv-improve"):
+            import cv
+            try:
+                out = {"ok": True, "text": cv.improve_text(str(data.get("text", "")), str(data.get("ruolo", "")))}
+            except Exception as e:
+                out = {"error": f"Migliora fallito: {e}"[:160]}
+            self._send(json.dumps(out, ensure_ascii=False).encode(), "application/json")
+        elif self.path.startswith("/cv-render"):
+            import cv
+            try:
+                out = {"ok": True, "tex": cv.render_latex_generic(data.get("model") or {}), "latex": cv.latex_available()}
+            except Exception as e:
+                out = {"error": f"Render fallito: {e}"[:160]}
+            self._send(json.dumps(out, ensure_ascii=False).encode(), "application/json")
+        elif self.path.startswith("/cv-pdf"):
+            import cv
+            pdf, err = cv.compile_pdf(str(data.get("tex", "")))
+            if pdf:
+                out = {"ok": True, "pdf": base64.b64encode(pdf).decode()}
+            else:
+                out = {"ok": False, "err": err}
             self._send(json.dumps(out, ensure_ascii=False).encode(), "application/json")
         elif self.path.startswith("/cv"):
             import cv

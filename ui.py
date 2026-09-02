@@ -2123,6 +2123,126 @@ function wireCv(){
  drop.ondragleave=()=>drop.style.borderColor='';
  drop.ondrop=e=>{e.preventDefault();drop.style.borderColor='';const f=e.dataTransfer.files[0];if(f)cvAnalyze(f);};
 }
+// ---- CV Builder LaTeX ----
+let __cvtex='';
+function cvBuilderPanel(){
+ return `<div class="panel" style="margin-top:18px" id="cvbuild"><div class="panel-h">${svg('doc')} Costruisci il CV in LaTeX</div><div class="panel-b">
+  <div class="fp" style="white-space:normal;margin-bottom:12px">Creo un CV professionale in LaTeX, <b>migliorato applicando i consigli dell'analisi</b>. Scarichi il <b>.tex</b> e il <b>PDF</b>. Tutto in locale, col modello acceso.</div>
+  <button class="btn pri" onclick="cvBuild('analysis')">${svg('spark')} Genera dal CV analizzato (applica i consigli)</button>
+  <div style="margin-top:14px"><div class="fp" style="margin-bottom:6px">Oppure incolla un testo o un vecchio CV:</div>
+   <textarea class="inp" id="cvsrc" rows="5" placeholder="Incolla qui il testo del CV..." style="width:100%;resize:vertical"></textarea>
+   <button class="btn" style="margin-top:8px" onclick="cvBuild('text')">${svg('spark')} Genera da questo testo</button></div>
+  <div id="cvbres" style="margin-top:16px"></div>
+ </div></div>`;
+}
+async function cvBuild(src){
+ const res=$('#cvbres');let body;
+ if(src==='analysis'){const last=LS.get('cv_last',null);if(!last){res.innerHTML='<div class="empty">Prima analizza un CV qui sopra, poi potro applicarne i consigli.</div>';return;}body={analysis:last};}
+ else{const t=(($('#cvsrc')||{}).value||'');if(t.trim().length<30){res.innerHTML='<div class="empty">Incolla un testo piu lungo (almeno qualche riga).</div>';return;}body={text:t};}
+ res.innerHTML='<div class="dwait">Genero il CV in LaTeX con il modello locale... (qualche secondo)</div>';
+ try{const d=await (await fetch('/cv-latex',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+  if(d.error){res.innerHTML=`<div class="empty">${esc(d.error)}<br><br>Se e' il modello, accendilo in basso a sinistra.</div>`;return;}
+  __cvtex=d.tex||'';
+  res.innerHTML=`<div class="toolbar" style="flex-wrap:wrap;margin-bottom:10px">
+    <button class="btn pri" onclick="cvDlTex()">${svg('doc')} Scarica .tex</button>
+    ${d.latex?`<button class="btn" onclick="cvDlPdf(this)">${svg('doc')} Scarica PDF</button>`:`<span class="fp" style="align-self:center">PDF non disponibile (LaTeX non installato): scarica il .tex e compilalo su Overleaf.</span>`}
+    <button class="btn" onclick="cvBuild('${src}')">${svg('spark')} Rigenera</button></div>
+   <div class="fp" style="margin-bottom:6px">Puoi ritoccare il LaTeX qui sotto prima di scaricare:</div>
+   <textarea class="inp" id="cvtex" rows="16" spellcheck="false" style="width:100%;font-family:monospace;font-size:12px;resize:vertical" oninput="__cvtex=this.value">${esc(__cvtex)}</textarea>
+   <div id="cvpdfres" class="fp" style="margin-top:6px"></div>`;
+ }catch(e){res.innerHTML='<div class="empty">Errore di rete. Il server e\' attivo?</div>';}
+}
+function _dlBlob(name,blob){const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),2000);}
+function cvDlTex(){_dlBlob('cv.tex',new Blob([__cvtex],{type:'application/x-tex'}));}
+async function cvDlPdf(btn){const r=$('#cvpdfres');btn.disabled=true;r.textContent='Compilo il PDF (MiKTeX)...';
+ try{const d=await (await fetch('/cv-pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tex:__cvtex})})).json();
+  if(d.ok){const bin=Uint8Array.from(atob(d.pdf),c=>c.charCodeAt(0));_dlBlob('cv.pdf',new Blob([bin],{type:'application/pdf'}));r.textContent='PDF scaricato.';}
+  else r.innerHTML='<span style="color:var(--red)">Compilazione fallita. Scarica il .tex e compila su Overleaf.</span>';}
+ catch(e){r.textContent='Errore di rete.';}finally{btn.disabled=false;}}
+// ---- Editor contenuti CV (mantieni la struttura) ----
+let __cvmodel=null;
+function cvEditorPanel(){
+ return `<div class="panel" style="margin-top:18px" id="cvedit"><div class="panel-h">${svg('doc')} Modifica un CV esistente (mantieni la struttura)</div><div class="panel-b">
+   <div class="fp" style="white-space:normal;margin-bottom:10px">Carica un CV in PDF: estraggo sezioni e contenuti nell'ordine originale, tu modifichi <b>solo i testi</b> (con aiuto AI per sezione), poi rigenero mantenendo la <b>stessa struttura</b> e scarichi .tex/PDF.</div>
+   <div class="cvdrop" id="cveddrop">${svg('doc')}<b>Trascina il CV in PDF o clicca per sceglierlo</b><span>Serve un PDF con testo (per ora niente immagini). Tutto in locale.</span></div>
+   <input type="file" id="cvedfile" accept="application/pdf,.pdf" hidden>
+   <div id="cvedout"></div></div></div>`;
+}
+async function cvExtract(file){
+ const out=$('#cvedout');
+ if(!/pdf/i.test(file.type)&&!/\.pdf$/i.test(file.name)){out.innerHTML='<div class="empty">Serve un PDF con testo.</div>';return;}
+ if(file.size>8e6){out.innerHTML='<div class="empty">PDF troppo grande (max 8 MB).</div>';return;}
+ out.innerHTML='<div class="dwait">Leggo il PDF ed estraggo la struttura del CV...</div>';
+ try{const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(file);});
+  const d=await (await fetch('/cv-extract',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pdf:b64})})).json();
+  if(d.error){out.innerHTML=`<div class="empty">${esc(d.error)}<br><br>Se e' il modello, accendilo in basso a sinistra.</div>`;return;}
+  __cvedLatex=!!d.latex;out.innerHTML=cvEditorRender(d.model);
+ }catch(e){out.innerHTML='<div class="empty">Errore di rete. Il server e\' attivo?</div>';}
+}
+let __cvedLatex=false;
+function cvEditorRender(m){
+ __cvmodel=m;const c=m.contatti||{};
+ let h=`<div class="panel" style="margin-top:14px"><div class="panel-b">
+   <div class="toolbar" style="flex-wrap:wrap">
+     <div class="fld"><label>Nome</label><input class="inp" id="ed-nome" value="${escA(m.nome||'')}"></div>
+     <div class="fld" style="flex:1"><label>Ruolo</label><input class="inp" id="ed-ruolo" value="${escA(m.ruolo||'')}"></div></div>
+   <div class="toolbar" style="flex-wrap:wrap">
+     <div class="fld"><label>Email</label><input class="inp" id="ed-email" value="${escA(c.email||'')}"></div>
+     <div class="fld"><label>Telefono</label><input class="inp" id="ed-tel" value="${escA(c.telefono||'')}"></div>
+     <div class="fld"><label>Luogo</label><input class="inp" id="ed-luogo" value="${escA(c.luogo||'')}"></div>
+     <div class="fld" style="flex:1;min-width:160px"><label>Link (virgola)</label><input class="inp" id="ed-link" value="${escA((c.link||[]).join(', '))}"></div></div>`;
+ (m.sezioni||[]).forEach((s,si)=>{
+  h+=`<div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px">
+    <div class="toolbar"><div class="fld" style="flex:1"><label>Sezione</label><input class="inp" id="sz-${si}" value="${escA(s.titolo||'')}"></div>
+     <button class="btn" style="align-self:flex-end" onclick="cvImproveSec(${si},this)">${svg('spark')} Migliora testi</button></div>`;
+  (s.blocchi||[]).forEach((b,bi)=>{
+   h+=`<div style="margin:8px 0 8px 8px;border-left:2px solid var(--line);padding-left:10px">
+     <div class="toolbar"><div class="fld" style="flex:1"><label>Titolo voce (opzionale)</label><input class="inp" id="bl-${si}-${bi}-t" value="${escA(b.titolo||'')}"></div>
+      <div class="fld"><label>Periodo</label><input class="inp" id="bl-${si}-${bi}-p" value="${escA(b.periodo||'')}" style="max-width:150px"></div></div>
+     <textarea class="inp" id="bl-${si}-${bi}-r" rows="${Math.max(2,(b.righe||[]).length)}" placeholder="una riga per punto" style="width:100%;resize:vertical;margin-top:6px">${esc((b.righe||[]).join('\n'))}</textarea></div>`;
+  });
+  h+=`</div>`;
+ });
+ h+=`<div class="toolbar" style="margin-top:16px;flex-wrap:wrap">
+    <button class="btn pri" onclick="cvEdGen()">${svg('doc')} Genera CV (stessa struttura)</button>
+    <button class="btn" onclick="$('#cvedout').innerHTML='';$('#cvedfile').value=''">Carica un altro</button></div>
+   <div id="ed-res" style="margin-top:10px"></div></div></div>`;
+ return h;
+}
+function cvCollectModel(){
+ const m=JSON.parse(JSON.stringify(__cvmodel||{sezioni:[]}));
+ m.nome=($('#ed-nome')||{}).value||'';m.ruolo=($('#ed-ruolo')||{}).value||'';
+ m.contatti={email:($('#ed-email')||{}).value||'',telefono:($('#ed-tel')||{}).value||'',luogo:($('#ed-luogo')||{}).value||'',link:(($('#ed-link')||{}).value||'').split(',').map(x=>x.trim()).filter(Boolean)};
+ (m.sezioni||[]).forEach((s,si)=>{const st=$('#sz-'+si);if(st)s.titolo=st.value;
+  (s.blocchi||[]).forEach((b,bi)=>{const t=$(`#bl-${si}-${bi}-t`),p=$(`#bl-${si}-${bi}-p`),r=$(`#bl-${si}-${bi}-r`);
+   if(t)b.titolo=t.value;if(p)b.periodo=p.value;if(r)b.righe=r.value.split('\n').map(x=>x.trim()).filter(Boolean);});});
+ return m;
+}
+async function cvImproveSec(si,btn){
+ const s=(__cvmodel.sezioni||[])[si];if(!s)return;const ruolo=($('#ed-ruolo')||{}).value||'';
+ const res=$('#ed-res');btn.disabled=true;res.innerHTML='<div class="dwait">Miglioro i testi della sezione (senza inventare)...</div>';
+ for(let bi=0;bi<(s.blocchi||[]).length;bi++){const ta=$(`#bl-${si}-${bi}-r`);if(!ta||!ta.value.trim())continue;
+  try{const d=await (await fetch('/cv-improve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:ta.value,ruolo})})).json();if(d.text)ta.value=d.text;}catch(e){}}
+ btn.disabled=false;res.innerHTML='<div class="cgfb ok" style="margin:0">Testi migliorati. Rivedi e genera.</div>';
+}
+async function cvEdGen(){
+ const res=$('#ed-res');res.innerHTML='<div class="dwait">Genero il CV (stessa struttura)...</div>';
+ try{const d=await (await fetch('/cv-render',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:cvCollectModel()})})).json();
+  if(d.error){res.innerHTML=`<div class="empty">${esc(d.error)}</div>`;return;}
+  __cvtex=d.tex||'';
+  res.innerHTML=`<div class="toolbar" style="flex-wrap:wrap;margin-bottom:8px">
+    <button class="btn pri" onclick="cvDlTex()">${svg('doc')} Scarica .tex</button>
+    ${d.latex?`<button class="btn" onclick="cvDlPdf(this)">${svg('doc')} Scarica PDF</button>`:`<span class="fp" style="align-self:center">PDF non disponibile: scarica il .tex (Overleaf).</span>`}</div>
+   <div class="fp" style="margin-bottom:6px">Puoi ritoccare il LaTeX prima di scaricare:</div>
+   <textarea class="inp" id="cvtex" rows="14" spellcheck="false" style="width:100%;font-family:monospace;font-size:12px;resize:vertical" oninput="__cvtex=this.value">${esc(__cvtex)}</textarea>
+   <div id="cvpdfres" class="fp" style="margin-top:6px"></div>`;
+ }catch(e){res.innerHTML='<div class="empty">Errore di rete.</div>';}
+}
+function wireCvEd(){const drop=$('#cveddrop'),inp=$('#cvedfile');if(!drop||!inp)return;
+ drop.onclick=()=>inp.click();inp.onchange=()=>{if(inp.files[0])cvExtract(inp.files[0]);};
+ drop.ondragover=e=>{e.preventDefault();drop.style.borderColor='var(--acc)';};
+ drop.ondragleave=()=>drop.style.borderColor='';
+ drop.ondrop=e=>{e.preventDefault();drop.style.borderColor='';const f=e.dataTransfer.files[0];if(f)cvExtract(f);};}
 async function cvAnalyze(file){
  const out=$('#cvout');
  if(file.type!=='application/pdf'&&!/\.pdf$/i.test(file.name)){out.innerHTML='<div class="empty">Serve un file PDF.</div>';return;}
@@ -2166,10 +2286,10 @@ function cvResult(d){
  return h;
 }
 RENDER.cv=function(){
- $('#view').innerHTML=cvUploader();
+ $('#view').innerHTML=cvUploader()+cvBuilderPanel()+cvEditorPanel();
  const last=LS.get('cv_last',null);
  if(last)$('#cvout').innerHTML=cvResult(last);
- wireCv();
+ wireCv();wireCvEd();
 };
 
 // ================= CyberQuest =================
