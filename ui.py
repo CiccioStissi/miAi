@@ -362,6 +362,12 @@ select.inp{cursor:pointer;appearance:none;padding-right:34px;
 .cvrw .pre{color:var(--red);font-size:13px;text-decoration:line-through;opacity:.75}
 .cvrw .post{color:var(--green);font-size:13.5px;margin-top:4px;font-weight:500}
 .cvprob .g{font-size:13px;color:var(--faint);margin-top:3px}
+.cvprof-list{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.cvprof{display:inline-flex;align-items:center;gap:2px}
+.cvprof .tag{cursor:pointer}
+.cvprof-x{background:none;border:none;color:var(--mut);cursor:pointer;font-size:16px;line-height:1;padding:0 4px}
+.cvprof-x:hover{color:var(--red)}
+.cvprof-save{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 /* CyberQuest */
 .cgnote{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;margin-bottom:16px;border-radius:12px;background:var(--acc-soft);border:1px solid var(--acc-line);color:var(--txt);font-size:13.5px;line-height:1.5}
 .cgnote svg{width:20px;height:20px;flex:none;color:var(--acc);margin-top:1px}
@@ -848,7 +854,7 @@ const $=s=>document.querySelector(s),el=(t,c,h)=>{const e=document.createElement
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const nfmt=n=>n>=1000?(n/1000).toFixed(n>=10000?0:1)+'k':String(n);
 const demoji=s=>String(s==null?'':s).replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}�️‍]/gu,'').replace(/\s{2,}/g,' ').trim();
-const PERSIST=['idee_fav','prod_fav','gh_saved','spesa_items','spesa_tpl','nutri_profile','inv_cfg','claude_titles','claude_budget','claude_plan','theme','prod_set','notif_on','cv_last','cyber_prog','agenda','projects','tasks','sections_on','onboarded','oggi_tiles','autolock_min'];
+const PERSIST=['idee_fav','prod_fav','gh_saved','spesa_items','spesa_tpl','nutri_profile','inv_cfg','claude_titles','claude_budget','claude_plan','theme','prod_set','notif_on','cv_last','cv_profiles','cyber_prog','agenda','projects','tasks','sections_on','onboarded','oggi_tiles','autolock_min'];
 const isPersist=k=>PERSIST.includes(k)||(''+k).indexOf('nutri_')===0;
 let _syncT=null;
 function pushStore(){const o={};for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(isPersist(k))o[k]=localStorage.getItem(k);}
@@ -2123,6 +2129,35 @@ function wireCv(){
  drop.ondragleave=()=>drop.style.borderColor='';
  drop.ondrop=e=>{e.preventDefault();drop.style.borderColor='';const f=e.dataTransfer.files[0];if(f)cvAnalyze(f);};
 }
+// ---- Profili CV (piu CV salvati, uno attivo = cv_last) ----
+const cvProfiles=()=>LS.get('cv_profiles',[]);
+function cvProfilesBar(){
+ const profs=cvProfiles(),last=LS.get('cv_last',null);
+ if(!profs.length&&!last)return '';
+ const chips=profs.map(p=>`<span class="cvprof"><button class="tag" title="carica questo profilo" onclick="cvLoadProfile('${escA(p.id)}')">${svg('doc')} ${esc(p.name)}</button><button class="cvprof-x" title="elimina" onclick="cvDelProfile('${escA(p.id)}')">&times;</button></span>`).join('');
+ const save=last?`<div class="cvprof-save"><input class="inp" id="cvpname" placeholder="Nome profilo (es. CV Sviluppo IT)" style="max-width:260px" value="${escA(last.nome||last._file||'CV')}"><button class="btn" onclick="cvSaveProfile()">${svg('check')} Salva CV attivo</button></div>`:'';
+ return `<div class="panel" style="margin-bottom:18px"><div class="panel-h">${svg('doc')} Profili CV${profs.length?`<span class="cnt num">${profs.length}</span>`:''}</div><div class="panel-b">
+   ${profs.length?`<div class="cvprof-list">${chips}</div>`:'<div class="fp" style="margin-bottom:10px">Nessun profilo salvato. Analizza un CV e salvalo per tenere piu versioni (IT/EN, ruoli diversi).</div>'}
+   ${save}</div></div>`;
+}
+function cvSaveProfile(){
+ const last=LS.get('cv_last',null);if(!last)return;
+ const name=(($('#cvpname')||{}).value||'').trim()||last.nome||last._file||'CV';
+ const profs=cvProfiles();
+ const id=String(Date.now());
+ profs.push({id,name,data:last});
+ LS.set('cv_profiles',profs.slice(-20));   // tetto ragionevole
+ RENDER.cv('cv');
+}
+function cvLoadProfile(id){
+ const p=cvProfiles().find(x=>x.id===id);if(!p)return;
+ LS.set('cv_last',p.data);
+ RENDER.cv('cv');
+}
+function cvDelProfile(id){
+ LS.set('cv_profiles',cvProfiles().filter(x=>x.id!==id));
+ RENDER.cv('cv');
+}
 // ---- CV Builder LaTeX ----
 let __cvtex='';
 function cvBuilderPanel(){
@@ -2286,7 +2321,7 @@ function cvResult(d){
  return h;
 }
 RENDER.cv=function(){
- $('#view').innerHTML=cvUploader()+cvBuilderPanel()+cvEditorPanel();
+ $('#view').innerHTML=cvProfilesBar()+cvUploader()+cvBuilderPanel()+cvEditorPanel();
  const last=LS.get('cv_last',null);
  if(last)$('#cvout').innerHTML=cvResult(last);
  wireCv();wireCvEd();
