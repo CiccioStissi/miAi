@@ -23,8 +23,8 @@ PC: **no personal data ever leaves the computer or hits the network.**
 |:--:|:--:|
 | ![Themes](docs/temi.png) | ![CV Builder LaTeX](docs/cv-builder.png) |
 | **30+ themes** | **CV Builder in LaTeX** |
-| ![CyberQuest](docs/cyberquest.png) | |
-| **CyberQuest** | |
+| ![CyberQuest](docs/cyberquest.png) | ![AI Usage](docs/ai.png) |
+| **CyberQuest** | **AI Usage** |
 
 ---
 

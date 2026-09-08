@@ -23,8 +23,8 @@ tuo PC: **nessun dato personale esce dal computer e finisce in rete.**
 |:--:|:--:|
 | ![Temi](docs/temi.png) | ![CV Builder LaTeX](docs/cv-builder.png) |
 | **30+ temi** | **CV Builder in LaTeX** |
-| ![CyberQuest](docs/cyberquest.png) | |
-| **CyberQuest** | |
+| ![CyberQuest](docs/cyberquest.png) | ![Consumi AI](docs/ai.png) |
+| **CyberQuest** | **Consumi AI** |
 
 ---
 
