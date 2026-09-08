@@ -1,5 +1,10 @@
 # miAi
 
+![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)
+![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
+![Offline](https://img.shields.io/badge/offline-100%25-success)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
+
 *Read in: [Italiano](README.md) · **English***
 
 **Personal command center — local, offline and privacy-first.**
@@ -9,6 +14,17 @@ PC: **no personal data ever leaves the computer or hits the network.**
 
 > Personal, single-user project, designed for local use on `127.0.0.1`.
 > Pluggable AI backend (local Ollama or any OpenAI-compatible endpoint).
+
+---
+
+## Preview
+
+| | |
+|:--:|:--:|
+| ![Themes](docs/temi.png) | ![CV Builder LaTeX](docs/cv-builder.png) |
+| **30+ themes** | **CV Builder in LaTeX** |
+| ![CyberQuest](docs/cyberquest.png) | |
+| **CyberQuest** | |
 
 ---
 
