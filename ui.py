@@ -368,6 +368,20 @@ select.inp{cursor:pointer;appearance:none;padding-right:34px;
 .cvprof-x{background:none;border:none;color:var(--mut);cursor:pointer;font-size:16px;line-height:1;padding:0 4px}
 .cvprof-x:hover{color:var(--red)}
 .cvprof-save{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+/* Terminal */
+.term-wrap{display:grid;grid-template-columns:1fr 260px;gap:18px;align-items:start}
+@media(max-width:820px){.term-wrap{grid-template-columns:1fr}}
+.term-main .panel-b{display:flex;flex-direction:column}
+.term-out{font-family:ui-monospace,Consolas,monospace;font-size:12.5px;line-height:1.5;padding:14px 16px;height:56vh;min-height:320px;overflow:auto;background:#0000001a;border-radius:var(--rk) var(--rk) 0 0}
+.term-hint{color:var(--mut)}
+.term-cmdline{color:var(--acc);margin:8px 0 2px;white-space:pre-wrap;word-break:break-all}
+.term-prompt{color:var(--acc);font-weight:700;margin-right:4px}
+.term-res{margin:0 0 6px;white-space:pre-wrap;word-break:break-word;color:var(--txt);font-family:inherit}
+.term-res.err{color:var(--red)}
+.term-in{display:flex;gap:8px;align-items:center;padding:10px 12px;border-top:1px solid var(--line)}
+.term-cmd{flex:1;background:none;border:none;outline:none;color:var(--txt);font-family:ui-monospace,Consolas,monospace;font-size:13px}
+.term-sugg{display:block;width:100%;text-align:left;margin:4px 0;padding:8px 10px;border:1px solid var(--line2);border-radius:var(--rk);background:none;color:var(--txt);cursor:pointer;font-size:13px;transition:.15s}
+.term-sugg:hover{border-color:var(--acc);color:var(--acc)}
 /* CyberQuest */
 .cgnote{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;margin-bottom:16px;border-radius:12px;background:var(--acc-soft);border:1px solid var(--acc-line);color:var(--txt);font-size:13.5px;line-height:1.5}
 .cgnote svg{width:20px;height:20px;flex:none;color:var(--acc);margin-top:1px}
@@ -906,6 +920,7 @@ const ICON={
  send:'<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>',
  layout:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>',
  monitor:'<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
+ terminal:'<rect x="2" y="3" width="20" height="18" rx="2"/><path d="M6 8l4 4-4 4M13 16h5"/>',
  pen:'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
  calendar:'<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M3 10h18M8 2v4M16 2v4"/>',
  robot:'<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4M9 4h6"/><circle cx="9" cy="14" r="1.2"/><circle cx="15" cy="14" r="1.2"/><path d="M2 13v3M22 13v3"/>',
@@ -933,6 +948,7 @@ const NAV=[
  {id:'pc',label:'PC',icon:'cpu',desc:'Consigli su misura per il tuo hardware reale.',cnt:()=>P.pc.length},
  {id:'disco',label:'Disco',icon:'disk',desc:'Spazio, file freddi e quanto puoi liberare.'},
  {id:'consumi',label:'Consumi AI',icon:'activity',desc:'Token usati dai tuoi agenti AI (Claude Code, Codex, Gemini...), combinati e per singolo agente.'},
+ {id:'terminal',label:'Terminal',icon:'terminal',desc:'Un terminale vero, in locale: avvia Ollama, gestisci i modelli e lancia comandi con un clic.'},
  {g:'Personale'},
  {id:'spesa',label:'Lista spesa',icon:'cart',desc:'La tua spesa, con modelli riutilizzabili.'},
  {id:'nutrizione',label:'Nutrizione',icon:'food',desc:'Calorie e macro di oggi, con il tuo fabbisogno stimato.'},
@@ -2326,6 +2342,78 @@ RENDER.cv=function(){
  if(last)$('#cvout').innerHTML=cvResult(last);
  wireCv();wireCvEd();
 };
+
+// ================= Terminal =================
+let __termCwd=null;                 // cartella corrente (la decide il server = home all'avvio)
+let __termLines=[];                 // blocchi di output gia' mostrati
+let __termHist=[],__termHi=-1;      // storico comandi (frecce su/giu)
+const TERM_SUGG=[
+ {g:'Ollama'},
+ {l:'Avvia Ollama',c:'__ollama_on'},
+ {l:'Ferma Ollama',c:'__ollama_off'},
+ {l:'Ollama in esecuzione',c:'ollama ps'},
+ {l:'Modelli installati',c:'ollama list'},
+ {l:'Scarica qwen2.5:3b',c:'ollama pull qwen2.5:3b-instruct'},
+ {l:'Versione Ollama',c:'ollama --version'},
+ {g:'Sistema'},
+ {l:'Cartella corrente',c:'echo %CD%'},
+ {l:'Contenuto cartella',c:'dir'},
+ {l:'Spazio dischi',c:'wmic logicaldisk get caption,freespace,size'},
+ {l:'Versione Python',c:'python --version'},
+];
+function termPanel(){
+ const sugg=TERM_SUGG.map(s=>s.g
+   ?`<div class="navgrp" style="margin:12px 0 4px">${s.l||s.g}</div>`
+   :`<button class="term-sugg" onclick="termPreset('${escA(s.c)}')">${esc(s.l)}</button>`).join('');
+ return `<div class="term-wrap">
+   <div class="panel term-main"><div class="panel-b" style="padding:0">
+     <div id="termout" class="term-out"></div>
+     <div class="term-in"><span class="term-prompt">&gt;</span>
+       <input id="termcmd" class="term-cmd" spellcheck="false" autocomplete="off" placeholder="scrivi un comando ed Invio (es. ollama list)">
+       <button class="btn" onclick="termExec()">Esegui</button>
+       <button class="btn" title="pulisci" onclick="__termLines=[];termRender()">Pulisci</button>
+     </div></div></div>
+   <div class="panel term-side"><div class="panel-h">${svg('bulb')} Suggerimenti</div><div class="panel-b">
+     <div class="fp" style="white-space:normal;margin-bottom:6px">Un clic li esegue subito. Tutto in locale.</div>
+     ${sugg}</div></div></div>`;
+}
+function termRender(){const o=$('#termout');if(!o)return;
+ o.innerHTML=__termLines.length?__termLines.join(''):'<div class="term-hint">Terminale locale. Lancia un comando o usa un suggerimento a destra. I comandi girano sul tuo PC, nella tua home.</div>';
+ o.scrollTop=o.scrollHeight;}
+function termPush(html){__termLines.push(html);if(__termLines.length>300)__termLines=__termLines.slice(-300);termRender();}
+async function termExec(cmd){
+ const inp=$('#termcmd');
+ if(cmd===undefined){cmd=(inp?inp.value:'').trim();if(inp)inp.value='';}
+ if(!cmd)return;
+ __termHist.push(cmd);__termHi=__termHist.length;
+ termPush(`<div class="term-cmdline"><span class="term-prompt">&gt;</span> ${esc(cmd)}</div>`);
+ try{
+  const d=await (await fetch('/term',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cmd,cwd:__termCwd})})).json();
+  if(d.cwd)__termCwd=d.cwd;
+  if(d.out)termPush(`<pre class="term-res ${d.ok?'':'err'}">${esc(d.out)}</pre>`);
+  else if(!d.ok)termPush(`<pre class="term-res err">[uscita ${d.code}]</pre>`);
+ }catch(e){termPush('<pre class="term-res err">Errore di rete: il server e\' attivo?</pre>');}
+}
+async function termPreset(c){
+ if(c==='__ollama_on'){termPush('<div class="term-cmdline">Avvio Ollama (staccato)...</div>');
+  try{const d=await (await fetch('/ollama',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({on:true})})).json();
+   termPush(`<pre class="term-res ${d.ok?'':'err'}">${esc(d.ok?'Ollama avviato. Attendi qualche secondo, poi \"Ollama in esecuzione\".':(d.err||'errore'))}</pre>`);}
+  catch(e){termPush('<pre class="term-res err">Errore di rete.</pre>');}
+  return;}
+ if(c==='__ollama_off'){termPush('<div class="term-cmdline">Arresto Ollama...</div>');
+  try{const d=await (await fetch('/ollama',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({on:false})})).json();
+   termPush(`<pre class="term-res ${d.ok?'':'err'}">${esc(d.ok?'Ollama arrestato.':(d.err||'errore'))}</pre>`);}
+  catch(e){termPush('<pre class="term-res err">Errore di rete.</pre>');}
+  return;}
+ termExec(c);
+}
+function wireTerm(){const inp=$('#termcmd');if(!inp)return;inp.focus();
+ inp.onkeydown=e=>{
+  if(e.key==='Enter'){e.preventDefault();termExec();}
+  else if(e.key==='ArrowUp'){if(__termHist.length){__termHi=Math.max(0,__termHi-1);inp.value=__termHist[__termHi]||'';e.preventDefault();}}
+  else if(e.key==='ArrowDown'){if(__termHist.length){__termHi=Math.min(__termHist.length,__termHi+1);inp.value=__termHist[__termHi]||'';e.preventDefault();}}
+ };}
+RENDER.terminal=function(){$('#view').innerHTML=termPanel();termRender();wireTerm();};
 
 // ================= CyberQuest =================
 const CG_TOTAL=520;               // lunghezza del percorso (>500 livelli)

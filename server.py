@@ -562,11 +562,25 @@ def _run_pipeline():
         _job["done_at"] = time.strftime("%H:%M")
 
 
+def _ollama_exe():
+    """Trova ollama.exe. shutil.which fallisce se il PATH del processo server non
+    include la cartella di Ollama (installer utente): controlla anche i percorsi noti."""
+    exe = shutil.which("ollama")
+    if exe:
+        return exe
+    for p in (os.path.expandvars(r"%LOCALAPPDATA%\Programs\Ollama\ollama.exe"),
+              os.path.expandvars(r"%PROGRAMFILES%\Ollama\ollama.exe"),
+              os.path.expanduser(r"~\AppData\Local\Programs\Ollama\ollama.exe")):
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def ollama_power(on):
     """Accende (ollama serve staccato) o spegne (taskkill ollama.exe) Ollama."""
-    exe = shutil.which("ollama")
+    exe = _ollama_exe()
     if not exe:
-        return {"ok": False, "err": "ollama non trovato nel PATH"}
+        return {"ok": False, "err": "ollama non trovato (ne' nel PATH ne' nei percorsi noti)"}
     try:
         if on:
             # CREATE_NO_WINDOW (0x08000000): niente console. FONDAMENTALE: DETACHED_PROCESS
@@ -583,6 +597,38 @@ def ollama_power(on):
         return {"ok": True, "running": False}
     except Exception as e:
         return {"ok": False, "err": str(e)[:150]}
+
+
+def term_run(cmd, cwd=None):
+    """Terminale locale: esegue un comando shell e ritorna l'output combinato.
+    Dietro local-only + PIN (do_POST). E' esecuzione arbitraria sulla macchina
+    dell'utente, per sua scelta esplicita (come il terminale integrato di un IDE).
+    ponytail: timeout fisso 60s; comandi che restano in ascolto (es. 'ollama serve')
+    vanno lanciati staccati dal bottone dedicato, non da qui."""
+    cmd = str(cmd or "").strip()
+    if not cmd:
+        return {"ok": True, "out": "", "code": 0, "cwd": cwd or str(Path.home())}
+    wd = cwd if cwd and os.path.isdir(cwd) else str(Path.home())
+    # 'cd' cambia solo la cartella corrente (stato tenuto dal client): non eseguirlo
+    if cmd == "cd" or cmd.startswith("cd "):
+        target = os.path.expandvars(os.path.expanduser(cmd[2:].strip().strip('"'))) or str(Path.home())
+        newp = os.path.abspath(target if os.path.isabs(target) else os.path.join(wd, target))
+        if os.path.isdir(newp):
+            return {"ok": True, "out": "", "code": 0, "cwd": newp}
+        return {"ok": False, "out": f"cd: {cmd[2:].strip()}: cartella inesistente", "code": 1, "cwd": wd}
+    env = dict(os.environ)
+    od = os.path.dirname(_ollama_exe() or "")   # il PATH del server puo' non avere Ollama
+    if od and od not in env.get("PATH", ""):
+        env["PATH"] = od + os.pathsep + env.get("PATH", "")
+    try:
+        p = subprocess.run(cmd, shell=True, cwd=wd, env=env, capture_output=True,
+                           text=True, timeout=60, errors="replace")
+        return {"ok": p.returncode == 0, "out": ((p.stdout or "") + (p.stderr or ""))[-20000:],
+                "code": p.returncode, "cwd": wd}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "out": "[interrotto: oltre 60s. Se e' un server, usa il bottone 'Avvia Ollama' o lancialo staccato]", "code": -1, "cwd": wd}
+    except Exception as e:
+        return {"ok": False, "out": str(e)[:400], "code": -1, "cwd": wd}
 
 
 def claude_usage():
@@ -1115,6 +1161,8 @@ class H(BaseHTTPRequestHandler):
             self._send(json.dumps(store_set(data)).encode(), "application/json")
         elif self.path.startswith("/ollama"):
             self._send(json.dumps(ollama_power(bool(data.get("on")))).encode(), "application/json")
+        elif self.path.startswith("/term"):
+            self._send(json.dumps(term_run(data.get("cmd", ""), data.get("cwd")), ensure_ascii=False).encode(), "application/json")
         elif self.path.startswith("/mappa"):
             self._send(json.dumps(mappa(str(data.get("title", "")), str(data.get("ctx", "")),
                                         deep=bool(data.get("deep")), regen=bool(data.get("regen")))).encode(),
