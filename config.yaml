@@ -33,8 +33,8 @@ disco_dup_min_mb: 50
 disco_alert_pct: 12
 
 # Modello (Ollama locale di default; configurabile dall'app)
-modello: qwen2.5:3b-instruct
-modello_forte: qwen2.5:7b-instruct
+modello: qwen3:4b
+modello_forte: qwen3:4b
 ollama_url: http://127.0.0.1:11434
 
 # GitHub token opzionale (env var GITHUB_TOKEN): alza il rate limit. Lascia vuoto.

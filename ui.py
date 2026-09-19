@@ -2347,13 +2347,13 @@ RENDER.cv=function(){
 let __termCwd=null;                 // cartella corrente (la decide il server = home all'avvio)
 let __termLines=[];                 // blocchi di output gia' mostrati
 let __termHist=[],__termHi=-1;      // storico comandi (frecce su/giu)
+let __termModels=[];                 // modelli Ollama installati (rilevati all'apertura)
 const TERM_SUGG=[
  {g:'Ollama'},
  {l:'Avvia Ollama',c:'__ollama_on'},
  {l:'Ferma Ollama',c:'__ollama_off'},
  {l:'Ollama in esecuzione',c:'ollama ps'},
  {l:'Modelli installati',c:'ollama list'},
- {l:'Scarica qwen2.5:3b',c:'ollama pull qwen2.5:3b-instruct'},
  {l:'Versione Ollama',c:'ollama --version'},
  {g:'Sistema'},
  {l:'Cartella corrente',c:'echo %CD%'},
@@ -2361,10 +2361,28 @@ const TERM_SUGG=[
  {l:'Spazio dischi',c:'wmic logicaldisk get caption,freespace,size'},
  {l:'Versione Python',c:'python --version'},
 ];
-function termPanel(){
- const sugg=TERM_SUGG.map(s=>s.g
+// suggerimenti che dipendono dal modello: si adattano a quello di miAi e a quelli installati
+function termModelBlock(){
+ const cur=(__llmModel||'').trim();
+ let h='';
+ if(cur){
+  h+='<div class="navgrp" style="margin:12px 0 4px">Modello di miAi</div>';
+  h+=__termModels.includes(cur)
+    ? `<button class="term-sugg" onclick="termPreset('ollama show ${escA(cur)}')">Info modello attuale (${esc(cur)})</button>`
+    : `<button class="term-sugg" onclick="termPreset('ollama pull ${escA(cur)}')">Scarica il modello attuale (${esc(cur)})</button>`;
+ }
+ if(__termModels.length){
+  h+='<div class="navgrp" style="margin:12px 0 4px">Modelli installati</div>';
+  h+=__termModels.map(m=>`<button class="term-sugg" onclick="termPreset('ollama show ${escA(m)}')">${esc(m)}</button>`).join('');
+ }
+ return h;
+}
+function termSuggHtml(){
+ return TERM_SUGG.map(s=>s.g
    ?`<div class="navgrp" style="margin:12px 0 4px">${s.l||s.g}</div>`
    :`<button class="term-sugg" onclick="termPreset('${escA(s.c)}')">${esc(s.l)}</button>`).join('');
+}
+function termPanel(){
  return `<div class="term-wrap">
    <div class="panel term-main"><div class="panel-b" style="padding:0">
      <div id="termout" class="term-out"></div>
@@ -2375,7 +2393,14 @@ function termPanel(){
      </div></div></div>
    <div class="panel term-side"><div class="panel-h">${svg('bulb')} Suggerimenti</div><div class="panel-b">
      <div class="fp" style="white-space:normal;margin-bottom:6px">Un clic li esegue subito. Tutto in locale.</div>
-     ${sugg}</div></div></div>`;
+     <div id="term-sugg-list">${termSuggHtml()}</div></div></div></div>`;
+}
+// rileva modello attivo (/health) e modelli installati (ollama list): i suggerimenti si adattano
+async function termLoadModels(){
+ try{if(!__llmModel){const h=await (await fetch('/health')).json();__llmModel=h.modello||'';}}catch(e){}
+ try{const d=await (await fetch('/term',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cmd:'ollama list'})})).json();
+  __termModels=(d.out||'').split('\n').slice(1).map(l=>l.trim().split(/\s+/)[0]).filter(x=>x&&x!=='NAME');
+ }catch(e){__termModels=[];}
 }
 function termRender(){const o=$('#termout');if(!o)return;
  o.innerHTML=__termLines.length?__termLines.join(''):'<div class="term-hint">Terminale locale. Lancia un comando o usa un suggerimento a destra. I comandi girano sul tuo PC, nella tua home.</div>';
@@ -2412,7 +2437,9 @@ function wireTerm(){const inp=$('#termcmd');if(!inp)return;inp.focus();
   if(e.key==='Enter'){e.preventDefault();termExec();}
   else if(e.key==='ArrowUp'){if(__termHist.length){__termHi=Math.max(0,__termHi-1);inp.value=__termHist[__termHi]||'';e.preventDefault();}}
   else if(e.key==='ArrowDown'){if(__termHist.length){__termHi=Math.min(__termHist.length,__termHi+1);inp.value=__termHist[__termHi]||'';e.preventDefault();}}
- };}
+ };
+ // i suggerimenti sul modello si adattano a quello attivo e a quelli installati
+ termLoadModels().then(()=>{const el=$('#term-sugg-list');if(el)el.insertAdjacentHTML('beforeend',termModelBlock());});}
 RENDER.terminal=function(){$('#view').innerHTML=termPanel();termRender();wireTerm();};
 
 // ================= CyberQuest =================
@@ -3089,7 +3116,7 @@ RENDER.modello=async function(){
    <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn pri" onclick="lmSave()">${svg('check')} Salva</button>
     <button class="btn" onclick="RENDER.modello('modello')">Ricarica</button></div>
    <div id="lm-res" style="margin-top:12px"></div>
-   <div class="fp" style="margin-top:14px;white-space:normal">Suggerimento: se il tuo PC regge modelli piu grandi, scaricali con <b>ollama pull</b> (es. qwen2.5:7b) e selezionali qui. Un PC potente puo usare modelli migliori; uno leggero resta su un 3b.</div>
+   <div class="fp" style="margin-top:14px;white-space:normal">Suggerimento: se il tuo PC regge modelli piu grandi, scaricali con <b>ollama pull</b> (es. qwen3:8b, gemma3:12b) e selezionali qui. Un PC potente puo usare modelli migliori; uno leggero resta su un 3-4b.</div>
   </div></div>`;
 };
 function lmProv(p){$('#lm-keywrap').style.display=(p==='openai')?'flex':'none';
