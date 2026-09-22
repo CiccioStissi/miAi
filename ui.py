@@ -788,6 +788,13 @@ select.inp{cursor:pointer;appearance:none;padding-right:34px;
 .srow .sright{flex:none;text-align:right}
 .srow .stok{font-weight:600;font-size:14px;font-variant-numeric:tabular-nums}
 .srow .smeta{color:var(--faint);font-size:11.5px;margin-top:2px;white-space:nowrap}
+.srow .sleft{flex:1;min-width:0}
+.srow .sleft .fn{font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srow .scode{color:var(--faint);font-size:11.5px;font-family:ui-monospace,Consolas,monospace;margin-top:2px}
+.srow .sdel{flex:none;background:none;border:none;color:var(--mut);cursor:pointer;font-size:18px;line-height:1;padding:0 6px}
+.srow .sdel:hover{color:var(--red)}
+.sadd{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px}
+.sadd .inp{flex:1;min-width:160px}
 
 /* Confronto multi-asset */
 .cmpline{fill:none;stroke-width:2.5}
@@ -868,7 +875,7 @@ const $=s=>document.querySelector(s),el=(t,c,h)=>{const e=document.createElement
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const nfmt=n=>n>=1000?(n/1000).toFixed(n>=10000?0:1)+'k':String(n);
 const demoji=s=>String(s==null?'':s).replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}�️‍]/gu,'').replace(/\s{2,}/g,' ').trim();
-const PERSIST=['idee_fav','prod_fav','gh_saved','spesa_items','spesa_tpl','nutri_profile','inv_cfg','claude_titles','claude_budget','claude_plan','theme','prod_set','notif_on','cv_last','cv_profiles','cyber_prog','agenda','projects','tasks','sections_on','onboarded','oggi_tiles','autolock_min'];
+const PERSIST=['idee_fav','prod_fav','gh_saved','spesa_items','spesa_tpl','nutri_profile','inv_cfg','claude_titles','claude_sessions','claude_budget','claude_plan','theme','prod_set','notif_on','cv_last','cv_profiles','cyber_prog','agenda','projects','tasks','sections_on','onboarded','oggi_tiles','autolock_min'];
 const isPersist=k=>PERSIST.includes(k)||(''+k).indexOf('nutri_')===0;
 let _syncT=null;
 function pushStore(){const o={};for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(isPersist(k))o[k]=localStorage.getItem(k);}
@@ -2088,16 +2095,31 @@ RENDER.consumi=function(){
    </div>${consumiSessions(u)}`;
   const cp=$('#cplan');if(cp)cp.onchange=()=>{LS.set('claude_plan',cp.value);RENDER.consumi();};
   const cb=$('#cb');if(cb)cb.onchange=()=>{LS.set('claude_budget',+cb.value||0);RENDER.consumi();};
-  document.querySelectorAll('.sname').forEach(inp=>inp.onchange=()=>{const t=LS.get('claude_titles',{});t[inp.dataset.id]=inp.value.trim();LS.set('claude_titles',t);});
+  const sc=$('#sess-code');if(sc)sc.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();sessAdd();}};
  }).catch(e=>{$('#view').innerHTML='<div class="empty">Errore nel leggere i consumi. Il server e attivo?</div>';});
 };
-function consumiSessions(u){const titles=LS.get('claude_titles',{});const by=u.sessions_by||{};let h='';
- (u.sources||[]).filter(s=>s.present&&(by[s.id]||[]).length).forEach(s=>{const list=by[s.id];
-  h+=`<div class="panel" style="margin-top:20px"><div class="panel-h">${svg(AGENT_ICON[s.id]||'activity')} Sessioni &middot; ${esc(s.label)} <span class="cnt num">${list.length}</span></div><div class="panel-b">
-   ${list.map(x=>{const title=titles[x.id]||x.fu||('Sessione '+String(x.id).slice(0,8));return `<div class="srow">
-     <input class="sname" data-id="${esc(x.id)}" value="${esc(title)}" placeholder="Titolo sessione">
-     <div class="sright"><div class="stok">${fmtTok(x.tok)}</div><div class="smeta">${x.msgs} msg${x.first?' &middot; '+esc(x.first):''}${x.last&&x.last!==x.first?' &rarr; '+esc(x.last):''}</div></div></div>`;}).join('')}</div></div>`;});
- return h;}
+// Sessioni ATTIVE: lista curata dall'utente (codice sessione di Claude Code + titolo).
+// Se il codice compare nei log locali, mostro i suoi consumi; altrimenti solo codice+titolo.
+function sessLookup(u){const by=u.sessions_by||{};const label={};(u.sources||[]).forEach(s=>label[s.id]=s.label);
+ const map={};Object.keys(by).forEach(sid=>{(by[sid]||[]).forEach(x=>{map[x.id]=Object.assign({agent:label[sid]||sid},x);});});return map;}
+function sessFind(map,code){code=(code||'').trim();if(!code)return null;if(map[code])return map[code];
+ const k=Object.keys(map).find(id=>id.indexOf(code)===0||code.indexOf(id)===0);return k?map[k]:null;}
+function consumiSessions(u){const mine=LS.get('claude_sessions',[]);const map=sessLookup(u);
+ const rows=mine.map((m,i)=>{const d=sessFind(map,m.code);const code=String(m.code||'');
+  return `<div class="srow">
+    <div class="sleft"><div class="fn">${esc(m.title||'Sessione')}</div><div class="scode">${esc(code.slice(0,20))}${code.length>20?'&hellip;':''}</div></div>
+    <div class="sright">${d?`<div class="stok">${fmtTok(d.tok)}</div><div class="smeta">${esc(d.agent||'')} &middot; ${d.msgs} msg${d.last?' &middot; '+esc(d.last):''}</div>`
+      :'<div class="smeta" style="opacity:.7">nessun consumo trovato per questo codice</div>'}</div>
+    <button class="sdel" title="rimuovi" onclick="sessDel(${i})">&times;</button></div>`;}).join('');
+ return `<div class="panel" style="margin-top:20px"><div class="panel-h">${svg('activity')} Sessioni attive <span class="cnt num">${mine.length}</span></div><div class="panel-b">
+   <div class="sadd"><input class="inp" id="sess-code" placeholder="Codice sessione (da Claude Code)"><input class="inp" id="sess-title" placeholder="Titolo"><button class="btn pri" onclick="sessAdd()">${svg('check')} Aggiungi</button></div>
+   ${mine.length?rows:'<div class="mini" style="margin-top:12px;white-space:normal">Aggiungi una sessione col suo <b>codice</b> (lo trovi in Claude Code) e un <b>titolo</b>. Se quel codice compare nei log locali, qui vedrai i suoi consumi.</div>'}
+ </div></div>`;}
+function sessAdd(){const ce=$('#sess-code'),te=$('#sess-title');const c=ce?ce.value.trim():'',t=te?te.value.trim():'';
+ if(!c)return;const list=LS.get('claude_sessions',[]);
+ if(list.some(x=>x.code===c)){if(ce)ce.value='';return;}
+ list.push({code:c,title:t||('Sessione '+c.slice(0,8))});LS.set('claude_sessions',list);RENDER.consumi();}
+function sessDel(i){const list=LS.get('claude_sessions',[]);list.splice(i,1);LS.set('claude_sessions',list);RENDER.consumi();}
 function dlMap(){const m=window.__map;if(!m)return;const r=m.r;
  let md=`# Mappa business: ${m.title}\n\n**${r.centro||m.title}**\n\n`;
  (r.rami||[]).forEach(n=>{md+=`## ${n.nome||''}\n`+(n.punti||[]).map(p=>`- ${p}`).join('\n')+`\n\n`;});
