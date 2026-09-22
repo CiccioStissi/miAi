@@ -795,6 +795,10 @@ select.inp{cursor:pointer;appearance:none;padding-right:34px;
 .srow .sdel:hover{color:var(--red)}
 .sadd{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px}
 .sadd .inp{flex:1;min-width:160px}
+.srow.clickrow{cursor:pointer;border-radius:8px;transition:background .15s}
+.srow.clickrow:hover{background:var(--line)}
+.scodebox{background:var(--line);border:1px solid var(--line2);border-radius:8px;padding:12px 14px;overflow-x:auto}
+.scodebox code{font-family:ui-monospace,Consolas,monospace;font-size:13.5px;word-break:break-all;color:var(--txt)}
 
 /* Confronto multi-asset */
 .cmpline{fill:none;stroke-width:2.5}
@@ -2105,12 +2109,12 @@ function sessLookup(u){const by=u.sessions_by||{};const label={};(u.sources||[])
 function sessFind(map,code){code=(code||'').trim();if(!code)return null;if(map[code])return map[code];
  const k=Object.keys(map).find(id=>id.indexOf(code)===0||code.indexOf(id)===0);return k?map[k]:null;}
 function consumiSessions(u){const mine=LS.get('claude_sessions',[]);const map=sessLookup(u);
- const rows=mine.map((m,i)=>{const d=sessFind(map,m.code);const code=String(m.code||'');
-  return `<div class="srow">
-    <div class="sleft"><div class="fn">${esc(m.title||'Sessione')}</div><div class="scode">${esc(code.slice(0,20))}${code.length>20?'&hellip;':''}</div></div>
+ const rows=mine.map((m,i)=>{const d=sessFind(map,m.code);
+  return `<div class="srow clickrow" onclick="sessOpen(${i})" title="clic per vedere e copiare il codice">
+    <div class="sleft"><div class="fn">${esc(m.title||'Sessione')}</div><div class="scode">${svg('doc')} clic per copiare il codice</div></div>
     <div class="sright">${d?`<div class="stok">${fmtTok(d.tok)}</div><div class="smeta">${esc(d.agent||'')} &middot; ${d.msgs} msg${d.last?' &middot; '+esc(d.last):''}</div>`
       :'<div class="smeta" style="opacity:.7">nessun consumo trovato per questo codice</div>'}</div>
-    <button class="sdel" title="rimuovi" onclick="sessDel(${i})">&times;</button></div>`;}).join('');
+    <button class="sdel" title="rimuovi" onclick="event.stopPropagation();sessDel(${i})">&times;</button></div>`;}).join('');
  return `<div class="panel" style="margin-top:20px"><div class="panel-h">${svg('activity')} Sessioni attive <span class="cnt num">${mine.length}</span></div><div class="panel-b">
    <div class="sadd"><input class="inp" id="sess-code" placeholder="Codice sessione (da Claude Code)"><input class="inp" id="sess-title" placeholder="Titolo"><button class="btn pri" onclick="sessAdd()">${svg('check')} Aggiungi</button></div>
    ${mine.length?rows:'<div class="mini" style="margin-top:12px;white-space:normal">Aggiungi una sessione col suo <b>codice</b> (lo trovi in Claude Code) e un <b>titolo</b>. Se quel codice compare nei log locali, qui vedrai i suoi consumi.</div>'}
@@ -2120,6 +2124,15 @@ function sessAdd(){const ce=$('#sess-code'),te=$('#sess-title');const c=ce?ce.va
  if(list.some(x=>x.code===c)){if(ce)ce.value='';return;}
  list.push({code:c,title:t||('Sessione '+c.slice(0,8))});LS.set('claude_sessions',list);RENDER.consumi();}
 function sessDel(i){const list=LS.get('claude_sessions',[]);list.splice(i,1);LS.set('claude_sessions',list);RENDER.consumi();}
+function sessOpen(i){const m=(LS.get('claude_sessions',[])||[])[i];if(!m)return;const code=String(m.code||'');
+ const ov=$('#detail');if(!ov)return;ov.textContent='';
+ ov.insertAdjacentHTML('beforeend',`<div class="dcard"><div class="dhead"><div class="dt">${esc(m.title||'Sessione')}</div><button class="dx" onclick="closeDetail()" title="chiudi">${svg('x')}</button></div>
+   <div class="dbody"><div class="fp" style="margin-bottom:8px">Codice sessione (Claude Code)</div>
+   <div class="scodebox"><code id="sesscode">${esc(code)}</code></div>
+   <button class="btn pri" style="margin-top:14px" onclick="sessCopy(this)">${svg('doc')} Copia codice</button></div></div>`);
+ ov.classList.add('on');}
+function sessCopy(btn){const el=$('#sesscode');const code=el?el.textContent:'';
+ (navigator.clipboard?navigator.clipboard.writeText(code):Promise.reject()).then(()=>{const o=btn.innerHTML;btn.textContent='Copiato';setTimeout(()=>{btn.innerHTML=o;},1400);}).catch(()=>{prompt('Copia il codice:',code);});}
 function dlMap(){const m=window.__map;if(!m)return;const r=m.r;
  let md=`# Mappa business: ${m.title}\n\n**${r.centro||m.title}**\n\n`;
  (r.rami||[]).forEach(n=>{md+=`## ${n.nome||''}\n`+(n.punti||[]).map(p=>`- ${p}`).join('\n')+`\n\n`;});
